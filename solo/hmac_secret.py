@@ -62,7 +62,7 @@ def make_credential(
     if output:
         print(credential_id.hex())
 
-    return credential_id
+    return credential_id, credential.public_key
 
 
 def simple_secret(

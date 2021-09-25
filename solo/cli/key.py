@@ -11,6 +11,8 @@ import base64
 import getpass
 import hashlib
 import os
+import pathlib
+import secrets
 import sys
 import time
 
@@ -18,7 +20,9 @@ import click
 from cryptography.hazmat.primitives import hashes
 from fido2.client import ClientError as Fido2ClientError
 from fido2.ctap1 import ApduError
-from fido2.ctap2 import CredentialManagement
+from fido2.ctap2 import CredentialManagement, PinProtocolV1
+from fido2.extensions import Extension
+from fido2.webauthn import PublicKeyCredentialRequestOptions
 
 import solo
 import solo.fido2
@@ -134,7 +138,11 @@ def feedkernel(count, serial):
     default="Touch your authenticator to generate a credential...",
     show_default=True,
 )
-def make_credential(serial, host, user, udp, prompt, pin):
+@click.option("--minisign", is_flag=True, default=False, help="Display public key in minisign compatible format")
+@click.option("--key-file", default=None, help="File to store public key (use with --minisign)")
+@click.option("--untrusted-comment", default=None,
+              help="Untrusted comment to write to public key file (use with --key-file) (default key ID)")
+def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, untrusted_comment):
     """Generate a credential.
 
     Pass `--prompt ""` to output only the `credential_id` as hex.
@@ -148,7 +156,7 @@ def make_credential(serial, host, user, udp, prompt, pin):
     if not pin:
         pin = None
 
-    solo.hmac_secret.make_credential(
+    _, pk = solo.hmac_secret.make_credential(
         host=host,
         user_id=user,
         serial=serial,
@@ -157,6 +165,36 @@ def make_credential(serial, host, user, udp, prompt, pin):
         udp=udp,
         pin=pin,
     )
+
+    pk_bytes = pk[-2]
+
+    if minisign:
+        key_id = secrets.token_bytes(8)
+        key_id_hex = f"{int.from_bytes(key_id, 'little'):X}"
+        minisign_pk = base64.b64encode(b"Ed" + key_id + pk_bytes)
+        print(f"Public key {key_id_hex} (minisign Base64): {minisign_pk.decode()}")
+    else:
+        print(f"Public key (HEX): {pk_bytes.hex()}")
+
+    if key_file is not None:
+        if minisign:
+            if untrusted_comment is not None:
+                untrusted_comment_bytes = untrusted_comment.encode()
+            else:
+                # key_id is interpreted as little endian integer and then converted to hex (omitting leading zeros)
+                untrusted_comment_bytes = b"minisign solokey public key " + key_id_hex.encode()
+
+            with open(key_file, "wb") as f:
+                f.write(b"untrusted comment: ")
+                f.write(untrusted_comment_bytes)
+                f.write(b"\n")
+                f.write(minisign_pk)
+                f.write(b"\n")
+
+            print(f"Minisign public key written to {key_file}")
+
+        else:
+            print("Writing key file is only supported for minisign keys")
 
 
 @click.command()
@@ -209,6 +247,143 @@ def challenge_response(serial, host, user, prompt, credential_id, challenge, udp
         udp=udp,
         pin=pin,
     )
+
+
+class MinisignExtension(Extension):
+    NAME = "minisign"
+
+    def __init__(self, ctap):
+        self._pin_protocol = PinProtocolV1(ctap)
+
+    def create_data(self):
+        return True
+
+    def create_result(self, data):
+        if data is not True:
+            raise ValueError("minisign extension not supported")
+
+    def get_data(self, digest: bytes, trusted_comment: bytes):
+        return {
+            1: digest,
+            2: trusted_comment
+        }
+
+    def get_result(self, data) -> bytes:
+        return data
+
+
+@click.command()
+@click.option("-s", "--serial", help="Serial number of Solo use")
+@click.option("--host", help="Relying party's host", default="solokeys.dev")
+@click.option("--user", help="User ID", default="they")
+@click.option("--pin", help="PIN", default=None)
+@click.option(
+    "--udp", is_flag=True, default=False, help="Communicate over UDP with software key"
+)
+@click.option(
+    "--prompt",
+    help="Prompt for user",
+    default="Touch your authenticator to generate a reponse...",
+    show_default=True,
+)
+@click.option("--sig-file", default=None, help="Destination file for minisign-compatible signature"
+                                               "(<filename>.minisig if empty)")
+@click.option("--trusted-comment", default=None,
+              help="Trusted comment included in global signature (default: time and file name)")
+@click.option("--untrusted-comment", default="signature created on solokey", show_default=True,
+              help="Untrusted comment not included in global signature (combine with --sig-file)")
+@click.option("--key-id", default=None,
+              help="Key ID to write to signature file (8 bytes as HEX) (combine with --sig-file) "
+                   "(default zeros)")
+@click.argument("credential-id")
+@click.argument("filename")
+def minisign(serial, host, user, prompt, credential_id, filename,
+             trusted_comment, udp, pin, sig_file, untrusted_comment, key_id):
+    """Sign data using minisign EdDSA"""
+
+    # check for PIN
+    if not pin:
+        pin = getpass.getpass("PIN (leave empty for no PIN): ")
+    if not pin:
+        pin = None
+
+    import binascii
+
+    user_id = user.encode()
+
+    client = solo.client.find(solo_serial=serial, udp=udp).client
+
+    # rp = {"id": host, "name": "Example RP"}
+    client.host = host
+    client.origin = f"https://{client.host}"
+    client.user_id = user_id
+    # user = {"id": user_id, "name": "A. User"}
+    credential_id = binascii.a2b_hex(credential_id)
+
+    allow_list = [{"type": "public-key", "id": credential_id}]
+
+    hasher = hashlib.blake2b()
+    with open(filename, "rb") as f:
+        while True:
+            data = f.read(64 * 1024)
+            if not data:
+                break
+            hasher.update(data)
+    digest = hasher.digest()
+
+    print(f"{digest.hex()}  {filename}")
+
+    just_file_name = pathlib.Path(filename).name
+
+    if trusted_comment is None:
+        timestamp = int(time.time())
+        trusted_comment = f"timestamp:{timestamp} file:{just_file_name}"
+        trusted_comment_bytes = trusted_comment.encode()
+        if len(trusted_comment_bytes) > 128:
+            trusted_comment = f"timestamp:{timestamp} file:<name too long>"
+        trusted_comment_bytes = trusted_comment.encode()
+    else:
+        trusted_comment_bytes = trusted_comment.encode()
+
+    print(f"Trusted comment: {trusted_comment}")
+
+    if prompt:
+        print(prompt)
+
+    ext = MinisignExtension(client.ctap2)
+    options = PublicKeyCredentialRequestOptions(
+        b"", 30000, host, allow_list, extensions=ext.get_dict(digest, trusted_comment_bytes)
+    )
+    assertions, client_data = client.get_assertion(options, pin=pin)
+
+    assertion = assertions[0]  # Only one cred in allowList, only one response.
+    signature = assertion.signature
+    global_signature = ext.results_for(assertion.auth_data)
+
+    print(f"Signature (Base64): {base64.b64encode(signature).decode()}")
+    print(f"Global signature (Base64): {base64.b64encode(global_signature).decode()}")
+
+    if sig_file is not None:
+        untrusted_comment_bytes = untrusted_comment.encode()
+        if key_id is not None:
+            key_id = int(key_id, 16).to_bytes(8, "little")
+        else:
+            key_id = bytes(8)
+
+        if sig_file == "":
+            sig_file = just_file_name + ".minisig"
+        with open(sig_file, "wb") as f:
+            f.write(b"untrusted comment: ")
+            f.write(untrusted_comment_bytes)
+            f.write(b"\n")
+            f.write(base64.b64encode(b"ED" + key_id + signature))
+            f.write(b"\ntrusted comment: ")
+            f.write(trusted_comment_bytes)
+            f.write(b"\n")
+            f.write(base64.b64encode(global_signature))
+            f.write(b"\n")
+
+        print(f"Signature written to {sig_file}")
 
 
 @click.command()
@@ -638,6 +813,7 @@ key.add_command(ping)
 key.add_command(keyboard)
 key.add_command(cred)
 key.add_command(sign_file)
+key.add_command(minisign)
 cred.add_command(cred_info)
 cred.add_command(cred_ls)
 cred.add_command(cred_rm)
