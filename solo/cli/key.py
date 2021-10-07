@@ -138,10 +138,10 @@ def feedkernel(count, serial):
     default="Touch your authenticator to generate a credential...",
     show_default=True,
 )
-@click.option("--minisign", is_flag=True, default=False, help="Display public key in minisign compatible format")
+@click.option("--minisign", is_flag=True, default=False, help="Display public key in Minisign-compatible format")
 @click.option("--key-file", default=None, help="File to store public key (use with --minisign)")
 @click.option("--untrusted-comment", default=None,
-              help="Untrusted comment to write to public key file (use with --key-file) (default key ID)")
+              help="Untrusted comment to write to public key file (use with --key-file) [default: <key ID>]")
 def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, untrusted_comment):
     """Generate a credential.
 
@@ -170,6 +170,7 @@ def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, un
 
     if minisign:
         key_id = secrets.token_bytes(8)
+        # key_id is interpreted as little endian integer and then converted to hex (omitting leading zeros)
         key_id_hex = f"{int.from_bytes(key_id, 'little'):X}"
         minisign_pk = base64.b64encode(b"Ed" + key_id + pk_bytes)
         print(f"Public key {key_id_hex} (minisign Base64): {minisign_pk.decode()}")
@@ -181,7 +182,6 @@ def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, un
             if untrusted_comment is not None:
                 untrusted_comment_bytes = untrusted_comment.encode()
             else:
-                # key_id is interpreted as little endian integer and then converted to hex (omitting leading zeros)
                 untrusted_comment_bytes = b"minisign solokey public key " + key_id_hex.encode()
 
             with open(key_file, "wb") as f:
@@ -286,20 +286,20 @@ class MinisignExtension(Extension):
     default="Touch your authenticator to generate a reponse...",
     show_default=True,
 )
-@click.option("--sig-file", default=None, help="Destination file for minisign-compatible signature"
-                                               "(<filename>.minisig if empty)")
+@click.option("--sig-file", default=None, help="Destination file for Minisign-compatible signature"
+                                               " (<filename>.minisig if empty)")
 @click.option("--trusted-comment", default=None,
-              help="Trusted comment included in global signature (default: time and file name)")
+              help="Trusted comment included in global signature [default: <time and file name>]")
 @click.option("--untrusted-comment", default="signature created on solokey", show_default=True,
               help="Untrusted comment not included in global signature (combine with --sig-file)")
 @click.option("--key-id", default=None,
               help="Key ID to write to signature file (8 bytes as HEX) (combine with --sig-file) "
-                   "(default zeros)")
+                   "[default: <zeros>]")
 @click.argument("credential-id")
 @click.argument("filename")
 def minisign(serial, host, user, prompt, credential_id, filename,
              trusted_comment, udp, pin, sig_file, untrusted_comment, key_id):
-    """Sign data using minisign EdDSA"""
+    """Sign file using Minisign-compatible pre-hashed Ed25519 signature"""
 
     # check for PIN
     if not pin:
