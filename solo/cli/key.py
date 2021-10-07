@@ -140,9 +140,11 @@ def feedkernel(count, serial):
 )
 @click.option("--minisign", is_flag=True, default=False, help="Display public key in Minisign-compatible format")
 @click.option("--key-file", default=None, help="File to store public key (use with --minisign)")
+@click.option("--key-id", default=None, help="Key ID to write to key file (8 bytes as HEX) (use with --key-file)"
+                                             " [default: <hash of credential ID>]")
 @click.option("--untrusted-comment", default=None,
               help="Untrusted comment to write to public key file (use with --key-file) [default: <key ID>]")
-def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, untrusted_comment):
+def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, key_id, untrusted_comment):
     """Generate a credential.
 
     Pass `--prompt ""` to output only the `credential_id` as hex.
@@ -156,7 +158,7 @@ def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, un
     if not pin:
         pin = None
 
-    _, pk = solo.hmac_secret.make_credential(
+    cred_id, pk = solo.hmac_secret.make_credential(
         host=host,
         user_id=user,
         serial=serial,
@@ -169,11 +171,17 @@ def make_credential(serial, host, user, udp, prompt, pin, minisign, key_file, un
     pk_bytes = pk[-2]
 
     if minisign:
-        key_id = secrets.token_bytes(8)
-        # key_id is interpreted as little endian integer and then converted to hex (omitting leading zeros)
-        key_id_hex = f"{int.from_bytes(key_id, 'little'):X}"
+        if key_id is not None:
+            key_id_hex = key_id
+            key_id = int(key_id, 16).to_bytes(8, "little")
+        else:
+            key_id = hashlib.blake2b(cred_id).digest()[:8]
+            # key_id is interpreted as little endian integer and then converted to hex (omitting leading zeros)
+            key_id_hex = f"{int.from_bytes(key_id, 'little'):X}"
+
         minisign_pk = base64.b64encode(b"Ed" + key_id + pk_bytes)
         print(f"Public key {key_id_hex} (minisign Base64): {minisign_pk.decode()}")
+
     else:
         print(f"Public key (HEX): {pk_bytes.hex()}")
 
@@ -294,7 +302,7 @@ class MinisignExtension(Extension):
               help="Untrusted comment not included in global signature (combine with --sig-file)")
 @click.option("--key-id", default=None,
               help="Key ID to write to signature file (8 bytes as HEX) (combine with --sig-file) "
-                   "[default: <zeros>]")
+                   "[default: <hash of credential ID>]")
 @click.argument("credential-id")
 @click.argument("filename")
 def minisign(serial, host, user, prompt, credential_id, filename,
@@ -368,7 +376,8 @@ def minisign(serial, host, user, prompt, credential_id, filename,
         if key_id is not None:
             key_id = int(key_id, 16).to_bytes(8, "little")
         else:
-            key_id = bytes(8)
+            key_id = hashlib.blake2b(credential_id).digest()[:8]
+        key_id_hex = f"{int.from_bytes(key_id, 'little'):X}"
 
         if sig_file == "":
             sig_file = just_file_name + ".minisig"
@@ -383,7 +392,7 @@ def minisign(serial, host, user, prompt, credential_id, filename,
             f.write(base64.b64encode(global_signature))
             f.write(b"\n")
 
-        print(f"Signature written to {sig_file}")
+        print(f"Signature using key {key_id_hex} written to {sig_file}")
 
 
 @click.command()
