@@ -18,6 +18,7 @@ from solo import helpers
 from solo.commands import SoloBootloader, SoloExtension
 
 from .base import SoloClient
+from ..minisign import MinisignExtension
 
 
 class Client(SoloClient):
@@ -73,7 +74,7 @@ class Client(SoloClient):
             self.ctap2 = None
 
         try:
-            self.client = Fido2Client(dev, self.origin)
+            self.client = Fido2Client(dev, self.origin, extension_types=[MinisignExtension])
         except CtapError:
             print("Not using FIDO2 interface.")
             self.client = None
