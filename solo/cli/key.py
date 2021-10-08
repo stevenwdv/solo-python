@@ -681,7 +681,7 @@ def sign_file(pin, serial, credential_id, filename):
 @click.option("--sig-file", default=None, help="Destination file for Minisign-compatible signature"
                                                " (<filename>.minisig if empty)")
 @click.option("--trusted-comment", default=None,
-              help="Trusted comment included in global signature [default: <time and file name>]")
+              help="Trusted comment included in global signature [default: <time and file name, prehashed>]")
 @click.option("--untrusted-comment", default="signature created on solokey", show_default=True,
               help="Untrusted comment not included in global signature (combine with --sig-file)")
 @click.option("--key-id", default=None,
@@ -729,10 +729,10 @@ def minisign(serial, host, user, prompt, credential_id, filename,
 
     if trusted_comment is None:
         timestamp = int(time.time())
-        trusted_comment = f"timestamp:{timestamp} file:{just_file_name}"
+        trusted_comment = f"timestamp:{timestamp}\tfile:{just_file_name}\tprehashed"
         trusted_comment_bytes = trusted_comment.encode()
         if len(trusted_comment_bytes) > 128:
-            trusted_comment = f"timestamp:{timestamp} file:<name too long>"
+            trusted_comment = f"timestamp:{timestamp}\tfile:<name too long>\tprehashed"
         trusted_comment_bytes = trusted_comment.encode()
     else:
         trusted_comment_bytes = trusted_comment.encode()
