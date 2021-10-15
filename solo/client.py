@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 
+import fido2.ctap2
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from fido2.attestation import Attestation
@@ -23,7 +24,7 @@ from fido2.ctap1 import CTAP1
 from fido2.ctap2 import CTAP2, CredentialManagement
 from fido2.hid import CTAPHID, CtapHidDevice
 from fido2.utils import hmac_sha256
-from fido2.webauthn import PublicKeyCredentialCreationOptions
+from fido2.webauthn import PublicKeyCredentialCreationOptions, PublicKeyCredentialDescriptor
 from intelhex import IntelHex
 
 import solo.exceptions
@@ -325,18 +326,21 @@ class SoloClient:
     def program_kbd(self, cmd):
         return self.ctap2.send_cbor(0x51, cmd)
 
-    def sign_hash(self, credential_id, dgst, pin):
+    def sign_hash(self, credential_id, dgst, pin, trusted_comment=None):
+        pin_auth = None
         if pin:
             pin_token = self.client.pin_protocol.get_pin_token(pin)
             pin_auth = hmac_sha256(pin_token, dgst)[:16]
-            return self.ctap2.send_cbor(
-                0x50,
-                {1: dgst, 2: {"id": credential_id, "type": "public-key"}, 3: pin_auth},
+
+        return self.ctap2.send_cbor(
+            0x50,
+            fido2.ctap2.args(
+                dgst,
+                PublicKeyCredentialDescriptor("public-key", credential_id),
+                pin_auth,
+                trusted_comment
             )
-        else:
-            return self.ctap2.send_cbor(
-                0x50, {1: dgst, 2: {"id": credential_id, "type": "public-key"}}
-            )
+        )
 
     def program_file(self, name):
         def parseField(f):
