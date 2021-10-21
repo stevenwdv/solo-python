@@ -326,7 +326,7 @@ class SoloClient:
     def program_kbd(self, cmd):
         return self.ctap2.send_cbor(0x51, cmd)
 
-    def sign_hash(self, credential_id, dgst, pin, trusted_comment=None):
+    def sign_hash(self, credential_id, dgst, pin, rp_id, trusted_comment=None):
         pin_auth = None
         if pin:
             pin_token = self.client.pin_protocol.get_pin_token(pin)
@@ -338,6 +338,7 @@ class SoloClient:
                 dgst,
                 PublicKeyCredentialDescriptor("public-key", credential_id),
                 pin_auth,
+                rp_id,
                 trusted_comment
             )
         )

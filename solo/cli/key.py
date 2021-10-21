@@ -661,6 +661,7 @@ def cred_rm(pin, credential_id, serial, udp):
     default="Touch your authenticator to generate a response...",
     show_default=True,
 )
+@click.option("--host", default="solo-sign-hash:", help="Choose relying host")
 @click.option("--minisign", is_flag=True, default=False, help="Use Minisign-compatible signatures (pre-hashed)")
 @click.option("--sig-file", default=None, help="Destination file for signature"
                                                " (<filename>.(mini)sig if empty)")
@@ -674,7 +675,7 @@ def cred_rm(pin, credential_id, serial, udp):
                    "[default: <hash of credential ID>]")
 @click.argument("credential-id")
 @click.argument("filename")
-def sign_file(pin, serial, udp, prompt, credential_id, filename, sig_file,
+def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
               minisign, trusted_comment, untrusted_comment, key_id):
     """Sign the specified file using the given credential-id"""
 
@@ -715,7 +716,7 @@ def sign_file(pin, serial, udp, prompt, credential_id, filename, sig_file,
         print(f"Trusted comment: {trusted_comment}")
 
         try:
-            ret = dev.sign_hash(credential_id, dgst.digest(), pin, trusted_comment_bytes)
+            ret = dev.sign_hash(credential_id, dgst.digest(), pin, host, trusted_comment_bytes)
         except CtapError as err:
             if err.code == CtapError.ERR.INVALID_OPTION:
                 print("Got CTAP error 0x2C INVALID_OPTION. Are you sure you used an EdDSA credential with Minisign?")
@@ -756,7 +757,7 @@ def sign_file(pin, serial, udp, prompt, credential_id, filename, sig_file,
             print(f"Signature using key {key_id_hex} written to {sig_file}")
 
     else:
-        ret = dev.sign_hash(credential_id, dgst.digest(), pin)
+        ret = dev.sign_hash(credential_id, dgst.digest(), pin, host)
         signature = ret[1]
 
         print(f"Signature (Base64): {base64.b64encode(signature).decode()}")
