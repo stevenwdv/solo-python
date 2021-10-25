@@ -338,8 +338,8 @@ class SoloClient:
                 dgst,
                 PublicKeyCredentialDescriptor("public-key", credential_id),
                 pin_auth,
-                rp_id,
-                trusted_comment
+                trusted_comment,
+                rp_id
             )
         )
 
