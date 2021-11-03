@@ -8,7 +8,10 @@
 # copied, modified, or distributed except according to those terms.
 
 import base64
+import hashlib
+import io
 import json
+import os
 import struct
 import sys
 import tempfile
@@ -343,6 +346,33 @@ class SoloClient:
                 rp_id
             )
         )
+
+    def signify(self, credential_id, file: io.RawIOBase, pin, rp_id):
+        if pin:
+            raise "PIN not supported yet"
+
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0, os.SEEK_SET)
+
+        hash_init = self.ctap2.send_cbor(
+            0x51,
+            fido2.ctap2.args(
+                PublicKeyCredentialDescriptor("public-key", credential_id),
+                rp_id
+            )
+        )[1]
+
+        dgst = hashlib.sha512(hash_init)
+        data = bytearray(64 * 1024)
+        view = memoryview(data)
+        while True:
+            block_len = file.readinto(data)
+            if not block_len:
+                break
+            dgst.update(view[:block_len])
+
+        return self.ctap2.send_cbor(0x52, dgst.digest())[1]
 
     def program_file(self, name):
         def parseField(f):
