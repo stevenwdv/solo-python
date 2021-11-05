@@ -782,7 +782,7 @@ def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
             file_signature = try_sign(lambda: dev.sign_pure(credential_id, file, pin, host), "EdDSA", host_prefix)
 
             if sig_file is not None:
-                save_sig(f"{filename}.sig" if sig_file is None else sig_file, "signify-compatible",
+                save_sig(f"{filename}.sig" if not sig_file else sig_file, "signify-compatible",
                          b"Ed", untrusted_comment.encode(), key_id, file_signature)
 
     elif alg == "minisign" or alg == "es256":
@@ -826,7 +826,7 @@ def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
             print(f"Global signature (Base64): {base64.b64encode(global_signature).decode()}")
 
             if sig_file is not None:
-                save_sig(f"{filename}.minisig" if sig_file is None else sig_file, "Minisign-compatible",
+                save_sig(f"{filename}.minisig" if not sig_file else sig_file, "Minisign-compatible",
                          b"ED", untrusted_comment.encode(), key_id, file_signature)
 
         else:
@@ -836,7 +836,7 @@ def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
             print(f"Signature (Base64): {base64.b64encode(file_signature).decode()}")
 
             if sig_file is not None:
-                with open(f"{filename}.sig" if sig_file is None else sig_file, "wb") as file:
+                with open(f"{filename}.sig" if not sig_file else sig_file, "wb") as file:
                     file.write(file_signature)
                 print(f"Saved raw signature to {sig_file}")
 
