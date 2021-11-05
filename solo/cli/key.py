@@ -135,14 +135,8 @@ def list_algorithms():
 @click.command()
 @click.option("-s", "--serial", help="Serial number of Solo use")
 @click.option(
-    "--host", help="Relying party's host  [default: solokeys.dev]", default=None
+    "--host", help="Relying party's host  [default: solokeys.dev, unless --sign-alg is specified]", default=None
 )
-@click.option("--sign-hash-host", is_flag=True, default=False,
-              help="Set host to default value for sign-file with ES256/Minisign, "
-                   "shorthand for --host 'solo-sign-hash:'")
-@click.option("--signify-host", is_flag=True, default=False,
-              help="Set host to default value for sign-file with signify, "
-                   "shorthand for --host 'solo-signify:'")
 @click.option("--user", help="User ID", default="they", show_default=True)
 @click.option("--pin", help="PIN", default=None)
 @click.option(
@@ -154,18 +148,20 @@ def list_algorithms():
     default="Touch your authenticator to generate a credential...",
     show_default=True,
 )
-@click.option("--alg", default="EdDSA,ES256", show_default=True,
+@click.option("--alg", default=None, show_default=True,
               help="Algorithm(s) for key, separated by ',', in order of preference")
 @click.option("--no-pubkey", is_flag=True, default=False, help="Do not display public key")
-@click.option("--signify/--minisign", is_flag=True, default=False,
-              help="Display public key in signify/Minisign-compatible format")
-@click.option("--key-file", default=None, help="File to store public key (use with --signify/--minisign)")
+@click.option("--sign-alg", default=None,
+              help="Make credential to be used with sign-file,"
+                   "configures --host & --alg and changes key display format, "
+                   "options are Minisign (Blake2b-prehashed EdDSA), ES256, EdDSA (pure)")
+@click.option("--key-file", default=None, help="File to store public key (with Minisign/EdDSA)")
 @click.option("--key-id", default=None, help="Key ID to write to key file (8 bytes as HEX) (use with --key-file) "
                                              "[default: <hash of credential ID>]")
 @click.option("--untrusted-comment", default=None,
               help="Untrusted comment to write to public key file (use with --key-file) [default: <key ID>]")
-def make_credential(serial, host, default_sign_host, user, udp, prompt, pin,
-                    alg, no_pubkey, signify, key_file, key_id, untrusted_comment):
+def make_credential(serial, host, user, udp, prompt, pin,
+                    alg, no_pubkey, sign_alg, key_file, key_id, untrusted_comment):
     """Generate a credential.
 
     Pass `--prompt "" --no-pubkey` to output only the `credential_id` as hex.
@@ -173,18 +169,30 @@ def make_credential(serial, host, default_sign_host, user, udp, prompt, pin,
 
     import solo.hmac_secret
 
-    algs = [fido2.cose.CoseKey.for_name(a).ALGORITHM for a in alg.split(",")]
-    if None in algs:
-        print("Error: Unknown algorithm(s): ", [a for a, aid in zip(alg.split(","), algs) if aid is None])
-        sys.exit(1)
+    if sign_alg is not None:
+        sign_alg = sign_alg.lower()
+        if sign_alg not in ["minisign", "es256", "eddsa"]:
+            print(f"Unknown signing algorithm: {sign_alg}")
 
-    if default_sign_host:
-        if host is not None:
-            print("Error: Cannot specify both --host and --default-sign-host")
+        if host is None:
+            host = "solo-sign-pure:" if sign_alg == "eddsa" else "solo-sign-hash:"
+            print(f"Host: '{host}'")
+
+        if alg is not None:
+            print("--alg cannot be specified with --sign-alg")
             sys.exit(2)
-        host = "solo-sign-hash:"
-    elif host is None:
-        host = "solokeys.dev"
+
+        algs = [fido2.cose.ES256.ALGORITHM if sign_alg == "es256" else fido2.cose.EdDSA.ALGORITHM]
+
+    else:
+        if alg is not None:
+            algs = [fido2.cose.CoseKey.for_name(a).ALGORITHM for a in alg.split(",")]
+            if None in algs:
+                print("Error: Unknown algorithm(s): ", [a for a, aid in zip(alg.split(","), algs) if aid is None])
+                sys.exit(1)
+
+        if host is None:
+            host = "solokeys.dev"
 
     # check for PIN
     if not pin:
@@ -205,9 +213,9 @@ def make_credential(serial, host, default_sign_host, user, udp, prompt, pin,
 
     pk_bytes = pk[-2]
 
-    if signify:
+    if sign_alg and sign_alg != "es256":
         if pk.ALGORITHM != fido2.cose.EdDSA.ALGORITHM:
-            print("Error: signify/Minisign only supports EdDSA keys "
+            print(f"Error: {sign_alg} only supports EdDSA keys "
                   f"but this credential was created using {type(pk).__name__}")
             sys.exit(1)
 
@@ -224,21 +232,21 @@ def make_credential(serial, host, default_sign_host, user, udp, prompt, pin,
             print(f"Public key ({type(pk).__name__}) {key_id_hex} (signify/Minisign Base64): {signify_pk.decode()}")
 
     elif not no_pubkey:
-        print(f"Public key ({type(pk).__name__}) (HEX): {pk_bytes.hex()}")
+        print(f"Public key ({type(pk).__name__}) (Base64): {base64.b64encode(pk_bytes).decode()}")
 
     if key_file is not None:
-        if signify:
+        if sign_alg and sign_alg != "es256":
             if untrusted_comment is not None:
                 untrusted_comment_bytes = untrusted_comment.encode()
             else:
                 untrusted_comment_bytes = b"signify/minisign solokey public key " + key_id_hex.encode()
 
-            with open(key_file, "wb") as f:
-                f.write(b"untrusted comment: ")
-                f.write(untrusted_comment_bytes)
-                f.write(b"\n")
-                f.write(signify_pk)
-                f.write(b"\n")
+            with open(key_file, "wb") as file:
+                file.write(b"untrusted comment: ")
+                file.write(untrusted_comment_bytes)
+                file.write(b"\n")
+                file.write(signify_pk)
+                file.write(b"\n")
 
             print(f"signify/Minisign public key written to {key_file}")
 
@@ -692,9 +700,8 @@ def cred_rm(pin, credential_id, serial, udp):
 )
 @click.option("--host", default=None,
               help="Choose relying host [default: 'solo-sign-hash:' or 'solo-sign-pure:' for EdDSA]")
-@click.option("--alg", help="Choose algorithm, one of: Minisign (Blake2b-prehashed EdDSA), ES256, EdDSA (pure)")
-@click.option("--signify", is_flag=True, default=False,
-              help="Use Signify-compatible signatures (not pre-hashed)")
+@click.option("--alg", required=True,
+              help="Choose algorithm, one of: Minisign (Blake2b-prehashed EdDSA), ES256, EdDSA (pure)")
 @click.option("--sig-file", default=None,
               help="Destination file for signature (<filename>.(mini)sig if empty)")
 @click.option("--trusted-comment", default=None,
@@ -753,14 +760,15 @@ def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
             return sign_fun()
         except CtapError as err:
             if err.code == CtapError.ERR.INVALID_OPTION or err.code == CtapError.ERR.INVALID_LENGTH:
-                print(f"Got CTAP error {err}. Are you sure you used a {cred_type} credential with {alg}?")
+                print(f"Got {err}. Are you sure you used a {cred_type} credential with {alg}?")
                 sys.exit(1)
             elif err.code == CtapError.ERR.INVALID_CREDENTIAL:
-                print(f"Got CTAP error {err}.")
+                print(f"Got {err}.")
                 if host.startswith(expected_host_prefix):
                     print(f"Are you sure you created this credential using host '{host}'?")
                 else:
-                    print(f"Host should start with '{expected_host_prefix}'")
+                    print(f"Host should start with '{expected_host_prefix}'\n"
+                          f"Try `solo key make-credential --sign-alg {alg}`")
                 sys.exit(1)
             else:
                 raise
