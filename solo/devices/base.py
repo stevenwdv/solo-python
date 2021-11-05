@@ -1,3 +1,5 @@
+import hashlib
+import io
 import struct
 
 from cryptography import x509
@@ -160,6 +162,31 @@ class SoloClient:
                 rp_id
             )
         )
+
+    def sign_pure(self, credential_id, file: io.RawIOBase, pin, rp_id):
+        ctap2 = CTAP2(self.get_current_hid_device())
+
+        if pin:
+            raise "PIN not supported yet"
+
+        hash_init = ctap2.send_cbor(
+            0x51,
+            fido2.ctap2.base.args(
+                PublicKeyCredentialDescriptor("public-key", credential_id),
+                rp_id
+            )
+        )[1]
+
+        dgst = hashlib.sha512(hash_init)
+        data = bytearray(64 * 1024)
+        view = memoryview(data)
+        while True:
+            block_len = file.readinto(data)
+            if not block_len:
+                break
+            dgst.update(view[:block_len])
+
+        return ctap2.send_cbor(0x52, dgst.digest())[1]
 
     def program_file(self, name):
         pass
