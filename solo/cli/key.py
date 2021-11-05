@@ -125,7 +125,7 @@ def feedkernel(count, serial):
 def list_algorithms():
     """Display algorithms supported by client.
 
-    These can be passed to `solo key make-credential`.
+    These can be passed to `solo key make-credential --alg`.
     """
 
     alg_names = (fido2.cose.CoseKey.for_alg(alg).__name__ for alg in fido2.cose.CoseKey.supported_algorithms())
@@ -148,8 +148,8 @@ def list_algorithms():
     default="Touch your authenticator to generate a credential...",
     show_default=True,
 )
-@click.option("--alg", default=None, show_default=True,
-              help="Algorithm(s) for key, separated by ',', in order of preference")
+@click.option("--alg", default=None, help="Algorithm(s) for key, separated by ',', in order of preference "
+                                          "[default: EdDSA,ES256, unless --sign-alg is specified]")
 @click.option("--no-pubkey", is_flag=True, default=False, help="Do not display public key")
 @click.option("--sign-alg", default=None,
               help="Make credential to be used with sign-file,"
