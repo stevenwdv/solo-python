@@ -167,7 +167,7 @@ class SoloClient:
         ctap2 = CTAP2(self.get_current_hid_device())
 
         if pin:
-            raise "PIN not supported yet"
+            raise RuntimeError("PIN not supported yet")
 
         hash_init = ctap2.send_cbor(
             0x51,
@@ -178,13 +178,12 @@ class SoloClient:
         )[1]
 
         dgst = hashlib.sha512(hash_init)
-        data = bytearray(64 * 1024)
-        view = memoryview(data)
+        data = memoryview(bytearray(1 << 16))
         while True:
             block_len = file.readinto(data)
             if not block_len:
                 break
-            dgst.update(view[:block_len])
+            dgst.update(data[:block_len])
 
         return ctap2.send_cbor(0x52, dgst.digest())[1]
 

@@ -778,12 +778,14 @@ def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
         if host is None:
             host = host_prefix
 
-        with open(filename, "rb") as file:
+        with open(filename, "rb", buffering=0) as file:
             file_signature = try_sign(lambda: dev.sign_pure(credential_id, file, pin, host), "EdDSA", host_prefix)
 
-            if sig_file is not None:
-                save_sig(f"{filename}.sig" if not sig_file else sig_file, "signify-compatible",
-                         b"Ed", untrusted_comment.encode(), key_id, file_signature)
+        print(f"Signature (Base64): {base64.b64encode(file_signature).decode()}")
+
+        if sig_file is not None:
+            save_sig(f"{filename}.sig" if not sig_file else sig_file, "signify-compatible",
+                     b"Ed", untrusted_comment.encode(), key_id, file_signature)
 
     elif alg == "minisign" or alg == "es256":
         host_prefix = "solo-sign-hash:"
@@ -791,12 +793,13 @@ def sign_file(pin, serial, udp, prompt, credential_id, host, filename, sig_file,
             host = host_prefix
 
         dgst = hashlib.blake2b() if alg == "minisign" else hashlib.sha256()
-        with open(filename, "rb") as file:
+        with open(filename, "rb", buffering=0) as file:
+            data = memoryview(bytearray(1 << 16))
             while True:
-                data = file.read(64 * 1024)
-                if not data:
+                block_len = file.readinto(data)
+                if not block_len:
                     break
-                dgst.update(data)
+                dgst.update(data[:block_len])
         print(f"{dgst.hexdigest()}  {filename}")
 
         if alg == "minisign":
